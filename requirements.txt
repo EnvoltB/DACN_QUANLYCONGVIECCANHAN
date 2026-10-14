@@ -1,0 +1,3 @@
+pip install 'markitdown[all]'
+pip install markitdown-ocr
+pip install openai

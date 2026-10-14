@@ -1,0 +1,23 @@
+// PostgreSQL 17.11
+q1a2z3x4
+Port: 5432
+PgBouncer Port 6432
+Apache Port 8080
+
+// cmd run venv
+.\.venv\Scripts\Activate.ps1
+
+
+//deactivate venv
+deactivate
+// (.venv) PS D:\DACN_QUANLYCONGVIECCANHAN> deactivate
+
+
+// lệnh convert file thành file .md để đỡ tốn token 
+markitdown path-to-file.pdf -o document.md
+
+
+
+npm init -y
+npm install react react-dom
+npm install -D typescript vite @vitejs/plugin-react @types/react @types/react-dom
