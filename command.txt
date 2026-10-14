@@ -21,3 +21,38 @@ markitdown path-to-file.pdf -o document.md
 npm init -y
 npm install react react-dom
 npm install -D typescript vite @vitejs/plugin-react @types/react @types/react-dom
+
+
+
+
+===========================
+// lệnh GitHub
+===========================
+git checkout ten-branch
+# Chuyển sang đúng branch cần làm việc (ví dụ: feature/login)
+
+git fetch origin
+# Chỉ tải về thông tin code mới nhất trên remote (GitHub/GitLab...),
+# CHƯA gộp vào code hiện tại -> dùng để kiểm tra trước, an toàn
+
+git pull origin ten-branch
+# Lấy code mới nhất từ remote VÀ gộp (merge) luôn vào code local
+# Nếu có người khác sửa trùng chỗ mình đang sửa -> sẽ báo conflict ở đây
+
+# -> Mở file bị conflict, tìm đoạn <<<<<<< ======= >>>>>>>, sửa tay cho đúng
+# -> sau đó git add . và git commit để hoàn tất
+
+# ... code tiếp ...
+# -> Đây là lúc bạn sửa code, thêm tính năng, fix bug...
+
+git add .
+# Gom tất cả file đã thay đổi vào "staging area"
+# (khu vực tạm, chuẩn bị để commit — chưa lưu chính thức)
+
+git commit -m "mô tả thay đổi"
+# Lưu chính thức các thay đổi vào lịch sử local (chưa đẩy lên remote)
+# "mô tả thay đổi" nên viết rõ ràng, ví dụ: "fix lỗi đăng nhập sai mật khẩu"
+
+git push origin ten-branch
+# Đẩy các commit vừa lưu lên remote (GitHub/GitLab)
+# để người khác (hoặc chủ repo) thấy được thay đổi của mình
