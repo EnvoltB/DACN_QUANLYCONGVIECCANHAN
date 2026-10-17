@@ -18,15 +18,24 @@ const HOURS = Array.from({ length: 24 }, (_, i) => i);
 // 60px per hour = exact 1px per minute
 const HOUR_HEIGHT = 60;
 
-const DAYS_BASE = [
-  { name: 'Thứ Hai', dateNum: 12, dateStr: '2026-10-12' },
-  { name: 'Thứ Ba', dateNum: 13, dateStr: '2026-10-13' },
-  { name: 'Thứ Tư', dateNum: 14, dateStr: '2026-10-14' },
-  { name: 'Thứ Năm', dateNum: 15, dateStr: '2026-10-15' },
-  { name: 'Thứ Sáu', dateNum: 16, dateStr: '2026-10-16' },
-  { name: 'Thứ Bảy', dateNum: 17, dateStr: '2026-10-17' },
-  { name: 'Chủ Nhật', dateNum: 18, dateStr: '2026-10-18' },
-];
+const getBaseWeekDays = () => {
+  const now = new Date();
+  const day = now.getDay();
+  const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+  const monday = new Date(now.getFullYear(), now.getMonth(), diff);
+  const names = ['Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy', 'Chủ Nhật'];
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    const ymd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    return {
+      name: names[i],
+      dateNum: d.getDate(),
+      dateStr: ymd,
+    };
+  });
+};
+const DAYS_BASE = getBaseWeekDays();
 
 export default function WeeklyCalendar({
   timeBlocks,

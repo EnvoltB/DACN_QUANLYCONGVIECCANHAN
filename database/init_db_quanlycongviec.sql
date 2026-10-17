@@ -106,7 +106,7 @@ CREATE TABLE tags (
 CREATE TABLE tasks (
     id BIGSERIAL PRIMARY KEY,
     user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    workspace_id BIGINT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    workspace_id BIGINT REFERENCES workspaces(id) ON DELETE CASCADE,
     category_id BIGINT REFERENCES categories(id) ON DELETE RESTRICT,
     title VARCHAR(255) NOT NULL,
     description TEXT,

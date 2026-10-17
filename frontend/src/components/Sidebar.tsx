@@ -168,7 +168,7 @@ export default function Sidebar({
       {/* ── Brand Logo ── */}
       <div className="sidebar-logo">
         <div className="logo-icon-svg">
-          {/* Sound wave icon matching Nhịp brand */}
+          {/* Sound wave icon matching SmartTask brand */}
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
             <rect width="24" height="24" rx="7" fill="#6C5CE7" />
             <path d="M7 10V14M10 7V17M14 5V19M17 10V14" stroke="white" strokeWidth="2" strokeLinecap="round" />
@@ -581,8 +581,11 @@ export default function Sidebar({
 
       {/* ── Settings Link ── */}
       <button
-        className="nav-item settings-link"
-        onClick={onOpenSettingsModal}
+        className={`nav-item settings-link ${activeNav === 'settings' ? 'active' : ''}`}
+        onClick={() => {
+          onNavChange('settings');
+          onOpenSettingsModal?.();
+        }}
         style={{ cursor: 'pointer' }}
       >
         <Settings size={18} />
@@ -642,6 +645,26 @@ export default function Sidebar({
                 <div style={{ fontSize: '0.72rem', opacity: 0.8 }}>{currentUser.email}</div>
               </div>
             )}
+            <button
+              onClick={() => {
+                setShowProfileMenu(false);
+                onNavChange('settings');
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '8px 10px',
+                borderRadius: 8,
+                fontSize: '0.82rem',
+                color: 'var(--text)',
+                textAlign: 'left',
+              }}
+              className="dropdown-item"
+            >
+              <Settings size={15} style={{ color: 'var(--primary)' }} />
+              <span>Tài khoản & Thiết lập</span>
+            </button>
             <button
               onClick={() => {
                 setShowProfileMenu(false);

@@ -42,7 +42,7 @@ function mapDtoToTimeBlock(dto: BackendTaskDto): TimeBlock & { isRecurring?: boo
     isAutoScheduled: !!dto.isAutoScheduled,
     isRecurring: !!dto.isRecurring,
     colorOverride: dto.colorCode,
-    priority: dto.priority,
+    priority: (dto.priority as any),
     workspaceId: dto.workspaceId,
     subtext: dto.subtext || (dto.status === 'COMPLETED' ? '✓ Đã hoàn thành' : dto.status === 'IN_PROGRESS' ? '• Đang làm' : 'Cần làm'),
   };

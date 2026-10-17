@@ -22,6 +22,8 @@ export interface TimeBlock {
   endTime: string;
   categoryType: CategoryType;
   status: TaskStatus;
+  priority?: Priority;
+  estimatedDurationMinutes?: number;
   isAutoScheduled: boolean;
 }
 

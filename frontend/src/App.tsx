@@ -11,7 +11,7 @@ import TaskModal from './components/TaskModal';
 import CategoryModal from './components/CategoryModal';
 import AuthPage from './pages/AuthPage';
 import TasksView from './components/TasksView';
-import SettingsModal from './components/SettingsModal';
+import SettingsPage from './pages/settings/SettingsPage';
 
 import { taskService } from './services/taskService';
 import { categoryService } from './services/categoryService';
@@ -40,8 +40,6 @@ export default function App() {
     return authService.getCurrentUser();
   });
 
-  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
-
   // ── Active Workspace State ──
   const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceItem | null>(null);
 
@@ -60,8 +58,8 @@ export default function App() {
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [viewMode, setViewMode] = useState<ViewMode>('week');
   const [searchQuery, setSearchQuery] = useState('');
-  // Calendar navigation date state (defaults to October 14, 2026 to show seeded tasks)
-  const [currentDate, setCurrentDate] = useState<Date>(() => new Date(2026, 9, 14));
+  // Calendar navigation date state (defaults to real current time: new Date())
+  const [currentDate, setCurrentDate] = useState<Date>(() => new Date());
 
   // Category Modal states
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
@@ -263,7 +261,9 @@ export default function App() {
   // Handle adding task from slot click
   const handleAddAtSlot = (dayIndex: number, hour: number) => {
     const targetDay = activeDays[dayIndex] || activeDays[0];
-    const selectedDate = targetDay ? targetDay.dateStr : '2026-10-14';
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const selectedDate = targetDay ? targetDay.dateStr : todayStr;
     const startHourStr = hour.toString().padStart(2, '0');
     const endHourStr = hour === 23 ? '23' : (hour + 1).toString().padStart(2, '0');
     const endMinStr = hour === 23 ? '59' : '00';
@@ -436,19 +436,23 @@ export default function App() {
   // Handle scheduling from AI Assistant
   const handleScheduleFromAI = async (newTask: Partial<TimeBlock>) => {
     try {
+      const now = new Date();
+      const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
       await taskService.createTask({
-        title: newTask.title || 'Làm báo cáo đồ án',
-        startTime: newTask.startTime || '2026-10-14T16:00:00+07:00',
-        endTime: newTask.endTime || '2026-10-14T17:00:00+07:00',
+        title: newTask.title || 'Công việc mới',
+        startTime: newTask.startTime || `${todayStr}T15:00:00+07:00`,
+        endTime: newTask.endTime || `${todayStr}T16:00:00+07:00`,
         categoryType: newTask.categoryType || 'WORK',
+        priority: (newTask as any).priority || 'MEDIUM',
         status: newTask.status || 'TODO',
         isAutoScheduled: true,
         workspaceId: activeWorkspace?.id || 1,
       });
-      showToast('✓ Trợ lý AI đã xếp lịch thành công!');
+      showToast('✓ Trợ lý AI đã thêm công việc vào lịch thành công!');
       await loadData(activeWorkspace?.id);
     } catch (err) {
       console.error('Lỗi xếp lịch AI:', err);
+      showToast('Lỗi khi lưu công việc từ Trợ lý AI');
     }
   };
 
@@ -480,7 +484,7 @@ export default function App() {
         onDeleteCategory={handleDeleteCategory}
         currentUser={currentUser}
         onOpenAuthModal={handleLogout}
-        onOpenSettingsModal={() => setIsSettingsModalOpen(true)}
+        onOpenSettingsModal={() => setActiveNav('settings')}
         onLogout={handleLogout}
         activeWorkspace={activeWorkspace}
         onWorkspaceChange={setActiveWorkspace}
@@ -489,120 +493,133 @@ export default function App() {
 
       {/* ── Center Main Content ── */}
       <main className="app-main">
-        {/* Top bar header with Theme Toggle & Auth */}
-        <TopBar
-          searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
-          theme={theme}
-          onToggleTheme={toggleTheme}
-          currentUser={currentUser}
-          onOpenAuthModal={() => setIsSettingsModalOpen(true)}
-          workspaceName={activeWorkspace?.name || 'Không gian cá nhân'}
-          activeNavTitle={activeNav === 'tasks' ? 'Công việc' : activeNav === 'ai' ? 'Trợ lý AI' : 'Lịch của tôi'}
-          onSelectTask={(taskId) => {
-            const task = timeBlocks.find((t) => t.id === taskId);
-            if (task) {
-              handleSelectBlock(task);
-            } else {
-              showToast(`Đã chọn thông báo liên quan đến công việc #${taskId}`);
-            }
-          }}
-        />
+        {activeNav === 'settings' ? (
+          <SettingsPage
+            currentUser={currentUser}
+            onUpdateProfile={handleUpdateProfile}
+            onLogout={handleLogout}
+            onShowToast={showToast}
+            onBackToCalendar={() => setActiveNav('calendar')}
+          />
+        ) : (
+          <>
+            {/* Top bar header with Theme Toggle & Auth */}
+            <TopBar
+              searchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
+              theme={theme}
+              onToggleTheme={toggleTheme}
+              currentUser={currentUser}
+              onOpenAuthModal={() => setActiveNav('settings')}
+              workspaceName={activeWorkspace?.name || 'Không gian cá nhân'}
+              activeNavTitle={activeNav === 'tasks' ? 'Công việc' : activeNav === 'ai' ? 'Trợ lý AI' : 'Lịch của tôi'}
+              onSelectTask={(taskId) => {
+                const task = timeBlocks.find((t) => t.id === taskId);
+                if (task) {
+                  handleSelectBlock(task);
+                } else {
+                  showToast(`Đã chọn thông báo liên quan đến công việc #${taskId}`);
+                }
+              }}
+            />
 
-        {/* Content Body: Calendar section OR Tasks View */}
-        <div className="content-body">
-          {activeNav === 'tasks' ? (
-            /* ── Full Task Management View (Tab "Công việc") ── */
-            <div style={{ flex: 1, overflowY: 'auto' }}>
-              <TasksView
-                tasks={displayedBlocks}
-                categories={categories}
-                onAddTask={() => {
-                  setEditingBlock(null);
-                  setIsModalOpen(true);
-                }}
-                onEditTask={handleSelectBlock}
-                onDeleteTask={handleDeleteTask}
-                onToggleStatus={handleToggleStatus}
-              />
-            </div>
-          ) : (
-            /* ── Weekly / Monthly Calendar Section (Tab "Lịch của tôi" & "Trợ lý AI") ── */
-            <div className="calendar-section">
-              {/* Hero Header with Add Task Button */}
-              <div className="page-content" style={{ padding: '20px 0 0' }}>
-                <HeroHeader
-                  userName={displayName}
-                  todayTasksCount={todayTasksCount}
-                  onAddTaskClick={() => {
-                    setEditingBlock(null);
-                    setIsModalOpen(true);
-                  }}
-                />
-
-                {/* Calendar Controls & Legend */}
-                <CalendarControls
-                  currentWeekText={currentWeekText}
-                  viewMode={viewMode}
-                  onViewModeChange={setViewMode}
-                  onPrevWeek={handlePrevDate}
-                  onNextWeek={handleNextDate}
-                  onToday={handleToday}
-                  categories={categories}
-                  selectedCategory={selectedCategory}
-                  onToggleCategory={(catName) => {
-                    setSelectedCategory((prev) => (prev === catName ? null : catName));
-                  }}
-                  statusFilter={statusFilter}
-                  onStatusFilterChange={setStatusFilter}
-                />
-              </div>
-
-              {/* Dynamic View: Month Grid OR Weekly/Daily Hourly Timeline Grid */}
-              {viewMode === 'month' ? (
-                <MonthCalendar
-                  currentDate={currentDate}
-                  timeBlocks={displayedBlocks}
-                  categories={categories}
-                  selectedCategory={selectedCategory}
-                  statusFilter={statusFilter}
-                  onSelectBlock={handleSelectBlock}
-                  onAddAtDate={handleAddAtDate}
-                />
+            {/* Content Body: Calendar section OR Tasks View */}
+            <div className="content-body">
+              {activeNav === 'tasks' ? (
+                /* ── Full Task Management View (Tab "Công việc") ── */
+                <div style={{ flex: 1, overflowY: 'auto' }}>
+                  <TasksView
+                    tasks={displayedBlocks}
+                    categories={categories}
+                    onAddTask={() => {
+                      setEditingBlock(null);
+                      setIsModalOpen(true);
+                    }}
+                    onEditTask={handleSelectBlock}
+                    onDeleteTask={handleDeleteTask}
+                    onToggleStatus={handleToggleStatus}
+                  />
+                </div>
               ) : (
-                <WeeklyCalendar
-                  days={activeDays}
-                  timeBlocks={displayedBlocks}
-                  categories={categories}
-                  selectedCategory={selectedCategory}
-                  statusFilter={statusFilter}
-                  onSelectBlock={handleSelectBlock}
-                  onAddAtSlot={handleAddAtSlot}
-                  onRescheduleTask={handleRescheduleTask}
-                />
+                /* ── Weekly / Monthly Calendar Section (Tab "Lịch của tôi" & "Trợ lý AI") ── */
+                <div className="calendar-section">
+                  {/* Hero Header with Add Task Button */}
+                  <div className="page-content" style={{ padding: '20px 0 0' }}>
+                    <HeroHeader
+                      userName={displayName}
+                      todayTasksCount={todayTasksCount}
+                      onAddTaskClick={() => {
+                        setEditingBlock(null);
+                        setIsModalOpen(true);
+                      }}
+                    />
+
+                    {/* Calendar Controls & Legend */}
+                    <CalendarControls
+                      currentWeekText={currentWeekText}
+                      viewMode={viewMode}
+                      onViewModeChange={setViewMode}
+                      onPrevWeek={handlePrevDate}
+                      onNextWeek={handleNextDate}
+                      onToday={handleToday}
+                      categories={categories}
+                      selectedCategory={selectedCategory}
+                      onToggleCategory={(catName) => {
+                        setSelectedCategory((prev) => (prev === catName ? null : catName));
+                      }}
+                      statusFilter={statusFilter}
+                      onStatusFilterChange={setStatusFilter}
+                    />
+                  </div>
+
+                  {/* Dynamic View: Month Grid OR Weekly/Daily Hourly Timeline Grid */}
+                  {viewMode === 'month' ? (
+                    <MonthCalendar
+                      currentDate={currentDate}
+                      timeBlocks={displayedBlocks}
+                      categories={categories}
+                      selectedCategory={selectedCategory}
+                      statusFilter={statusFilter}
+                      onSelectBlock={handleSelectBlock}
+                      onAddAtDate={handleAddAtDate}
+                    />
+                  ) : (
+                    <WeeklyCalendar
+                      days={activeDays}
+                      timeBlocks={displayedBlocks}
+                      categories={categories}
+                      selectedCategory={selectedCategory}
+                      statusFilter={statusFilter}
+                      onSelectBlock={handleSelectBlock}
+                      onAddAtSlot={handleAddAtSlot}
+                      onRescheduleTask={handleRescheduleTask}
+                    />
+                  )}
+
+                  {/* Bottom 3 Stats Cards */}
+                  <StatsBar stats={stats} />
+                </div>
               )}
 
-              {/* Bottom 3 Stats Cards */}
-              <StatsBar stats={stats} />
+              {/* ── Right Panel: AI Assistant SmartTask ── */}
+              <AIAssistantPanel
+                currentDate={currentDate}
+                onScheduleTask={handleScheduleFromAI}
+                onEditTaskDetails={(info) => {
+                  setEditingBlock({
+                    title: info.title,
+                    startTime: `${info.date}T${info.startTime}:00+07:00`,
+                    endTime: `${info.date}T${info.endTime}:00+07:00`,
+                    priority: info.priority || 'MEDIUM',
+                    categoryType: info.categoryType || 'WORK',
+                    status: 'TODO',
+                  });
+                  setIsModalOpen(true);
+                }}
+              />
             </div>
-          )}
-
-          {/* ── Right Panel: AI Assistant SmartTask ── */}
-          <AIAssistantPanel
-            onScheduleTask={handleScheduleFromAI}
-            onEditTaskDetails={(info) => {
-              setEditingBlock({
-                title: info.title,
-                startTime: `${info.date}T${info.startTime}:00+07:00`,
-                endTime: `${info.date}T${info.endTime}:00+07:00`,
-                priority: info.priority,
-                categoryType: 'WORK',
-                status: 'TODO',
-              });
-              setIsModalOpen(true);
-            }}
-          />
-        </div>
+          </>
+        )}
       </main>
 
       {/* ── Add / Edit / Delete Task Modal ── */}
@@ -622,17 +639,6 @@ export default function App() {
         onSave={handleSaveCategory}
         onDelete={handleDeleteCategory}
         category={editingCategory}
-      />
-
-
-      {/* ── Settings Modal (Tài khoản & Thiết lập) ── */}
-      <SettingsModal
-        isOpen={isSettingsModalOpen}
-        onClose={() => setIsSettingsModalOpen(false)}
-        currentUser={currentUser}
-        theme={theme}
-        onToggleTheme={toggleTheme}
-        onUpdateProfile={handleUpdateProfile}
       />
 
       {/* ── Floating Toast Notification ── */}
