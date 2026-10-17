@@ -153,11 +153,45 @@ public class AiServiceImpl implements AiService {
      * Gemini key chưa nhập
      */
     private AiParseTaskResponse fallbackHeuristicParse(String prompt, OffsetDateTime refDateTime) {
-        String lower = prompt.toLowerCase();
+        String normalized = prompt;
+        // Chuẩn hóa từ số nói "một" -> "1" (theo yêu cầu: nói 1 thì sẽ luôn là số)
+        normalized = normalized.replaceAll("(?i)\\b(?:một|mốt)\\s*(?:giờ|gio|h)\\b", "1h");
+        normalized = normalized.replaceAll("(?i)\\b(?:một|mốt)\\s*(?:tiếng|tieng)\\b", "1 tiếng");
+        normalized = normalized.replaceAll("(?i)\\b(?:một|mốt)\\s*(?:lịch|lich)\\b", "1 lịch");
+        normalized = normalized.replaceAll("(?i)\\b(?:một|mốt)\\s*(?:ngày|ngay)\\b", "1 ngày");
+        normalized = normalized.replaceAll("(?i)\\b(?:một|mốt)\\s*(?:phút|phut|p)\\b", "1 phút");
+        normalized = normalized.replaceAll("(?i)\\b(?:vào lúc|lúc|từ|đến|tới|khoảng|tầm)\\s+(?:một|mốt)\\b", "$0 1");
+        normalized = normalized.replaceAll("(?i)\\b(?:một|mốt)\\b", "1");
+
+        // Chuẩn hóa các số khác trong ngữ cảnh thời gian:
+        normalized = normalized.replaceAll("(?i)\\bhai\\s*(?:giờ|gio|h)\\b", "2h");
+        normalized = normalized.replaceAll("(?i)\\bhai\\s*(?:tiếng|tieng)\\b", "2 tiếng");
+        normalized = normalized.replaceAll("(?i)\\bba\\s*(?:giờ|gio|h)\\b", "3h");
+        normalized = normalized.replaceAll("(?i)\\bbốn\\s*(?:giờ|gio|h)\\b", "4h");
+        normalized = normalized.replaceAll("(?i)\\bnăm\\s*(?:giờ|gio|h)\\b", "5h");
+        normalized = normalized.replaceAll("(?i)\\bsáu\\s*(?:giờ|gio|h)\\b", "6h");
+        normalized = normalized.replaceAll("(?i)\\bbảy\\s*(?:giờ|gio|h)\\b", "7h");
+        normalized = normalized.replaceAll("(?i)\\btám\\s*(?:giờ|gio|h)\\b", "8h");
+        normalized = normalized.replaceAll("(?i)\\bchín\\s*(?:giờ|gio|h)\\b", "9h");
+        normalized = normalized.replaceAll("(?i)\\bmười\\s*(?:giờ|gio|h)\\b", "10h");
+
+        // Chuẩn hóa cách viết liền/rời thời lượng và giờ phút:
+        normalized = normalized.replaceAll("(?i)\\b(\\d+)tiếng\\b", "$1 tiếng");
+        normalized = normalized.replaceAll("(?i)\\b(\\d+)h(\\d{1,2})p(?:h|hút)?\\b", "$1h$2");
+
+        String lower = normalized.toLowerCase();
 
         // 1. Phân loại Category
         String categoryType = "WORK";
         if (lower.contains("học") || lower.contains("hoc")
+                || lower.contains("tiếng anh") || lower.contains("tieng anh")
+                || lower.contains("anh văn") || lower.contains("anh van")
+                || lower.contains("english") || lower.contains("ielts") || lower.contains("toeic") || lower.contains("toefl")
+                || lower.contains("toán") || lower.contains("toan")
+                || lower.contains("văn") || lower.contains("van")
+                || lower.contains("lý") || lower.contains("ly")
+                || lower.contains("hóa") || lower.contains("hoa")
+                || lower.contains("sinh học") || lower.contains("ngoại ngữ")
                 || lower.contains("đồ án") || lower.contains("do an")
                 || lower.contains("bài tập") || lower.contains("bai tap") || lower.contains("bài") || lower.contains("bai")
                 || lower.contains("thi") || lower.contains("ôn") || lower.contains("on")
@@ -192,8 +226,7 @@ public class AiServiceImpl implements AiService {
         // 3. Ngày tháng (Date & Day of Week)
         OffsetDateTime targetDate = refDateTime;
 
-        // Bóc tách thứ trong tuần: thứ 2 -> thứ 7, chủ nhật / cn (hỗ trợ cả có dấu và
-        // không dấu: thứ/thu)
+        // Bóc tách thứ trong tuần: thứ 2 -> thứ 7, chủ nhật / cn (hỗ trợ cả có dấu và không dấu: thứ/thu)
         Integer targetDayOfWeek = null; // 1 = Monday, ..., 7 = Sunday
         if (Pattern.compile("\\b((?:thứ|thu)\\s*(?:hai|2)|t2)\\b").matcher(lower).find()) {
             targetDayOfWeek = DayOfWeek.MONDAY.getValue();
@@ -229,6 +262,8 @@ public class AiServiceImpl implements AiService {
                 dayDiff += 7;
             }
             targetDate = refDateTime.plusDays(dayDiff);
+        } else if (lower.contains("ngày hôm sau") || lower.contains("hôm sau")) {
+            targetDate = refDateTime.plusDays(1);
         } else if (lower.contains("ngày mai") || lower.contains("chiều mai") || lower.contains("sáng mai")
                 || lower.contains("tối mai")) {
             targetDate = refDateTime.plusDays(1);
@@ -244,9 +279,9 @@ public class AiServiceImpl implements AiService {
         int duration = 60;
         boolean hasExplicitHour = false;
 
-        // Ưu tiên 1: Nhận diện khoảng giờ dạng "vào lúc 20 giờ đến 21 giờ", "7h to 8h", "từ 7h đến 8h", "7h - 8h", "20h30 đến 21h30" (hỗ trợ có dấu và không dấu: vao luc, gio, den, toi...)
+        // Ưu tiên 1: Nhận diện khoảng giờ dạng "vào lúc 20 giờ đến 21 giờ", "1h đến 2h30p", "7h to 8h", "từ 7h đến 8h", "7h - 8h"
         Pattern rangePattern = Pattern.compile(
-                "(?:(?:từ|tu|vào lúc|vao luc|lúc|luc|vào|vao|tầm|tam|khoảng|khoang)\\s*)?(\\d{1,2})(?:\\s*(?:h|giờ|gio)(?:\\s*(\\d{2}))?|:(\\d{2}))?\\s*(?:to|đến|den|tới|toi|-)\\s*(?:(?:lúc|luc|vào|vao)\\s*)?(\\d{1,2})(?:\\s*(?:h|giờ|gio)(?:\\s*(\\d{2}))?|:(\\d{2}))?");
+                "(?:(?:từ|tu|vào lúc|vao luc|lúc|luc|vào|vao|tầm|tam|khoảng|khoang)\\s*)?(\\d{1,2})(?:\\s*(?:h|giờ|gio)(?:\\s*(\\d{1,2})(?:p|ph|phút|phut)?)?|:(\\d{2}))?\\s*(?:to|đến|den|tới|toi|-)\\s*(?:(?:lúc|luc|vào|vao)\\s*)?(\\d{1,2})(?:\\s*(?:h|giờ|gio)(?:\\s*(\\d{1,2})(?:p|ph|phút|phut)?)?|:(\\d{2}))?");
         Matcher rangeMatcher = rangePattern.matcher(lower);
 
         if (rangeMatcher.find()) {
@@ -306,22 +341,37 @@ public class AiServiceImpl implements AiService {
                 }
             }
 
-            // Bóc tách mốc giờ bắt đầu đơn lẻ: "lúc 15h", "vào 7h", "15h", "vào lúc 20 giờ" (hỗ trợ có dấu và không dấu)
-            Pattern hourPattern = Pattern
-                    .compile("(?:vào lúc|vao luc|lúc|luc|vào|vao|tầm|tam|khoảng|khoang)?\\s*(\\d{1,2})(?:\\s*(?:h|giờ|gio)(?:\\s*(\\d{2}))?|:(\\d{2})|:00)?(?:\\s*(?:sáng|sang|chiều|chieu|tối|toi))?");
-            Matcher hourMatcher = hourPattern.matcher(lower);
+            // Bóc tách mốc giờ bắt đầu đơn lẻ: "lúc 15h", "vào 7h", "15h", "vào lúc 20 giờ", tránh nhận nhầm 'lần 1', 'lần 2'
+            String timeSearchText = lower.replaceAll("(?i)\\blần\\s*(?:thứ\\s*)?\\d+\\b", "");
+
+            Pattern hourPattern = Pattern.compile(
+                    "(?:(?:vào lúc|vao luc|lúc|luc|vào|vao|tầm|tam|khoảng|khoang)\\s+(\\d{1,2})(?:\\s*(?:h|giờ|gio)(?:\\s*(\\d{1,2}))?|:(\\d{2}))?|\\b(\\d{1,2})(?:\\s*(?:h|giờ|gio)(?:\\s*(\\d{1,2}))?|:(\\d{2})))(?:\\s*(?:sáng|sang|chiều|chieu|tối|toi))?");
+            Matcher hourMatcher = hourPattern.matcher(timeSearchText);
             if (hourMatcher.find()) {
                 hasExplicitHour = true;
-                targetHour = Integer.parseInt(hourMatcher.group(1));
+                String matchedHourStr = hourMatcher.group(1) != null ? hourMatcher.group(1) : hourMatcher.group(4);
+                targetHour = Integer.parseInt(matchedHourStr);
+                String minuteStr = hourMatcher.group(2) != null ? hourMatcher.group(2) : (hourMatcher.group(3) != null ? hourMatcher.group(3) : (hourMatcher.group(5) != null ? hourMatcher.group(5) : hourMatcher.group(6)));
+                if (minuteStr != null) {
+                    try {
+                        targetMinute = Integer.parseInt(minuteStr);
+                    } catch (Exception ignored) {}
+                }
                 if ((lower.contains("chiều") || lower.contains("chieu") || lower.contains("tối") || lower.contains("toi")) && targetHour < 12) {
                     targetHour += 12;
                 }
             } else if (lower.contains("sáng") || lower.contains("sang")) {
-                targetHour = 9;
+                targetHour = 8;
+                targetMinute = 30;
             } else if (lower.contains("chiều") || lower.contains("chieu")) {
-                targetHour = 15;
+                targetHour = 14;
+                targetMinute = 0;
             } else if (lower.contains("tối") || lower.contains("toi")) {
                 targetHour = 19;
+                targetMinute = 0;
+            } else {
+                targetHour = 8;
+                targetMinute = 30;
             }
         }
 
@@ -330,7 +380,7 @@ public class AiServiceImpl implements AiService {
         OffsetDateTime endTime = startTime.plusMinutes(duration);
 
         // 5. Làm sạch Tiêu đề hoàn toàn (Loại bỏ thứ, dải giờ, thời lượng, mốc giờ khỏi tên task)
-        String cleanTitle = cleanTitle(prompt);
+        String cleanTitle = cleanTitle(normalized);
 
         return AiParseTaskResponse.builder()
                 .title(cleanTitle)
@@ -354,52 +404,63 @@ public class AiServiceImpl implements AiService {
             return "Công việc mới";
         String clean = text;
 
-        // 1. Loại bỏ các tiền tố mệnh lệnh (có dấu và không dấu)
+        // 0. Chuẩn hóa từ số nói "một" -> "1"
+        clean = clean.replaceAll("(?i)\\b(?:một|mốt)\\b", "1");
+
+        // 1. Loại bỏ các tiền tố mệnh lệnh (hỗ trợ đầy đủ các biến thể 'hãy lặp/lập cho tôi một lịch...', 'lặp lịch...', 'tạo lịch'...)
         clean = clean.replaceAll(
-                "(?i)^(nhắc tôi|nhac toi|nhắc em|nhac em|nhắc mình|nhac minh|hãy nhớ|hay nho|nhớ|nho|lên lịch|len lich|tạo lịch|tao lich|đặt lịch|dat lich|sắp xếp cho tôi|sap xep cho toi|sắp xếp|sap xep|làm ơn|lam on)\\s*",
+                "(?i)^(?:hãy|hay)?\\s*(?:lặp|lap|lập|tao|tạo|lên|len|đặt|dat|xếp|xep|nhắc|nhac|sắp xếp|sap xep)\\s*(?:cho tôi|cho toi|cho em|cho mình|cho minh|tôi|toi|giúp tôi|giup toi)?\\s*(?:một|mot|1)?\\s*(?:lịch trình|lich trinh|công việc|cong viec|tác vụ|tac vu|lịch|lich|buổi|buoi)?\\s*",
+                "");
+        clean = clean.replaceAll("(?i)^(nhắc tôi|nhac toi|nhắc em|nhac em|nhắc mình|nhac minh|hãy nhớ|hay nho|nhớ|nho|lên lịch|len lich|tạo lịch|tao lich|đặt lịch|dat lich|sắp xếp cho tôi|sap xep cho toi|sắp xếp|sap xep|làm ơn|lam on)\\s*", "");
+
+        // 1.1 Loại bỏ số rác đứng trước "vào lúc", "lúc", "từ" (ví dụ: 'Tiếng Anh 2 vào lúc 1h' -> 'Tiếng Anh vào lúc 1h')
+        clean = clean.replaceAll("(?i)\\b\\d+\\s+(?=(?:vào lúc|vao luc|lúc|luc|từ|tu|đến|den|tới|toi|khoảng|khoang|tầm|tam)\\b)", "");
+        clean = clean.replaceAll("(?i)\\blần\\s*(?:thứ\\s*)?\\d+\\b", "");
+
+        // 2. Loại bỏ dải giờ (có dấu và không dấu: vào lúc 1h đến 2h30p, vào lúc 20 giờ đến 21 giờ...)
+        clean = clean.replaceAll(
+                "(?i)(?:(?:từ|tu|vào lúc|vao luc|lúc|luc|tầm|tam|khoảng|khoang)\\s*)?\\d{1,2}(?:\\s*(?:h|giờ|gio)(?:\\s*\\d{1,2}(?:p|ph|phút|phut)?)?|:\\d{2})?\\s*(?:to|đến|den|tới|toi|-)\\s*(?:(?:lúc|luc|vào|vao)\\s*)?\\d{1,2}(?:\\s*(?:h|giờ|gio)(?:\\s*\\d{1,2}(?:p|ph|phút|phut)?)?|:\\d{2})?(?:\\s*(?:sáng|sang|chiều|chieu|tối|toi))?",
                 "");
 
-        // 2. Loại bỏ dải giờ (có dấu và không dấu: vào lúc 20 giờ đến 21 giờ, vao luc 20 gio den 21 gio, 7h to 8h...)
+        // 3. Loại bỏ mốc giờ đơn lẻ (vào lúc 20 giờ, lúc 7h, 15h, 1h chiều...)
         clean = clean.replaceAll(
-                "(?i)(?:(?:từ|tu|vào lúc|vao luc|lúc|luc|tầm|tam|khoảng|khoang)\\s*)?\\d{1,2}(?:\\s*(?:h|giờ|gio)(?:\\s*\\d{1,2})?|:\\d{2})?\\s*(?:to|đến|den|tới|toi|-)\\s*(?:(?:lúc|luc|vào|vao)\\s*)?\\d{1,2}(?:\\s*(?:h|giờ|gio)(?:\\s*\\d{1,2})?|:\\d{2})?",
+                "(?i)\\b(?:vào lúc|vao luc|lúc|luc|vào|vao|tầm|tam|khoảng|khoang)\\s*\\d{1,2}(?:\\s*(?:h|giờ|gio)(?:\\s*\\d{1,2}(?:p|ph|phút|phut)?)?|:\\d{2})?(?:\\s*(?:sáng|sang|chiều|chieu|tối|toi))?\\b",
                 "");
+        clean = clean.replaceAll("(?i)\\b\\d{1,2}\\s*(?:h|giờ|gio)(?:\\s*\\d{1,2}(?:p|ph|phút|phut)?)?\\b", "");
 
-        // 3. Loại bỏ mốc giờ đơn lẻ (vào lúc 20 giờ, vao luc 20 gio, lúc 7h, luc 7h...)
-        clean = clean.replaceAll(
-                "(?i)\\b(?:vào lúc|vao luc|lúc|luc|vào|vao|tầm|tam|khoảng|khoang)\\s*\\d{1,2}(?:\\s*(?:h|giờ|gio)(?:\\s*\\d{1,2})?|:\\d{2})?(?:\\s*(?:sáng|sang|chiều|chieu|tối|toi))?\\b",
-                "");
-        clean = clean.replaceAll("(?i)\\b\\d{1,2}\\s*(?:h|giờ|gio)(?:\\s*\\d{1,2})?\\b", "");
+        // 4. Loại bỏ thời lượng (khoảng 1 tiếng rưỡi, trong 60 phút, 2 tiếng, 1h30...)
+        clean = clean.replaceAll("(?i)\\b(?:trong|khoảng|khoang|kéo dài|keo dai|tầm|tam)?\\s*\\d+\\s*(?:phút|phut|p|tiếng|tieng|giờ|gio)(?:\\s*(?:rưỡi|ruoi|30))?\\b", "");
+        clean = clean.replaceAll("(?i)\\b(?:khoảng|khoang|tầm|tam)?\\s*(?:\\d+\\s*)?(?:tiếng rưỡi|tieng ruoi|nửa tiếng|nua tieng)\\b", "");
+        clean = clean.replaceAll("(?i)\\b(?:khoảng|khoang|tầm|tam)\\s+(?:rưỡi|ruoi)\\b", "");
+        clean = clean.replaceAll("(?i)\\b(?:rưỡi|ruoi)\\b", "");
 
-        // 4. Loại bỏ thời lượng (trong 60 phút, 2 tiếng, 1h30...)
-        clean = clean.replaceAll("(?i)\\b(?:trong|khoảng|khoang|kéo dài|keo dai|tầm|tam)?\\s*\\d+\\s*(?:phút|phut|p|tiếng|tieng|giờ|gio)\\b", "");
-        clean = clean.replaceAll("(?i)\\b(tiếng rưỡi|tieng ruoi|nửa tiếng|nua tieng)\\b", "");
-
-        // 5. Loại bỏ ngày cụ thể & từ chỉ ngày (ngày 17/10, ngay 17/10, ngày 17, ngay 17, ngày, ngay...)
+        // 5. Loại bỏ ngày cụ thể & từ chỉ ngày (ngày 17/10, ngày 17, ngày hôm sau, hôm sau...)
         clean = clean.replaceAll("(?i)\\b(?:vào\\s*|vao\\s*)?(?:ngày|ngay)\\s*\\d{1,2}(?:[/\\-]\\d{1,2})?(?:[/\\-]\\d{4})?\\b", "");
         clean = clean.replaceAll("(?i)\\b(?:vào\\s*|vao\\s*)?(?:ngày|ngay)\\s*\\d{1,2}\\s*(?:tháng|thang)\\s*\\d{1,2}\\b", "");
+        clean = clean.replaceAll("(?i)\\b(ngày hôm sau|ngay hom sau|hôm sau|hom sau)\\b", "");
         clean = clean.replaceAll("(?i)\\b(?:vào\\s*|vao\\s*)?(?:ngày|ngay)\\b", "");
 
-        // 6. Loại bỏ thứ trong tuần (thứ 2 - thứ 7, thu 2 - thu 7, chủ nhật, chu nhat, cn, t2-t7)
+        // 6. Loại bỏ thứ trong tuần (thứ 2 - thứ 7, thứ bảy, chủ nhật, cn...)
         clean = clean.replaceAll(
                 "(?i)\\b((?:thứ|thu)\\s*(?:hai|ba|tư|tu|bốn|bon|năm|nam|sáu|sau|bảy|bay|[2-7])|(?:chủ|chu)\\s*(?:nhật|nhat)|cn|t[2-7])\\b",
                 "");
 
-        // 7. Loại bỏ từ chỉ mốc thời gian tương đối & buổi (có dấu và không dấu)
+        // 7. Loại bỏ từ chỉ mốc thời gian tương đối & buổi (chiều, sáng, tối...)
         clean = clean.replaceAll(
                 "(?i)\\b(hôm nay|hom nay|hôm qua|hom qua|ngày mai|ngay mai|ngày mốt|ngay mot|ngày kia|ngay kia|hôm kia|hom kia|tuần này|tuan nay|tuần sau|tuan sau|tháng này|thang nay|tháng sau|thang sau)\\b",
                 "");
         clean = clean.replaceAll(
-                "(?i)\\b(sáng nay|sang nay|chiều nay|chieu nay|tối nay|toi nay|sáng mai|sang mai|chiều mai|chieu mai|tối mai|toi mai|sáng|sang|chiều|chieu|tối|toi)\\b",
+                "(?i)\\b(sáng nay|sang nay|chiều nay|chieu nay|tối nay|toi nay|sáng mai|sang mai|chiều mai|chieu mai|tối mai|toi mai|sáng|sang|chiều|chieu|tối|toi|trưa|trua|đêm|dem)\\b",
                 "");
 
         // 8. Loại bỏ độ ưu tiên
         clean = clean.replaceAll("(?i)\\b(ưu tiên|uu tien)\\s*(?:cao|thấp|thap|trung bình|trung binh|khẩn cấp|khan cap)\\b", "");
         clean = clean.replaceAll("(?i)\\b(khẩn cấp|khan cap|quan trọng|quan trong|rất quan trọng|rat quan trong|gấp|gap)\\b", "");
 
-        // 9. Dọn sạch các từ nối còn sót (vào lúc, vao luc, vào, vao, lúc, luc, từ, tu, đến, den, tới, toi...) và dấu câu thừa
-        clean = clean.replaceAll("(?i)\\b(vào lúc|vao luc|vào|vao|lúc|luc|từ|tu|đến|den|tới|toi)\\b", "");
-        clean = clean.replaceAll("[\\.,;:!\\?~]+$", "").trim();
-        clean = clean.replaceAll("^[\\.,;:!\\?~]+", "").trim();
+        // 9. Dọn sạch các từ nối còn sót (vào lúc, vào, lúc, từ, đến, tới...) và dấu câu thừa
+        clean = clean.replaceAll("(?i)\\b(vào lúc|vao luc|vào|vao|lúc|luc|từ|tu|đến|den|tới|toi|khoảng|khoang|tầm|tam)\\b", "");
+        clean = clean.replaceAll("[\\.,;:!\\?~\\-_]+$", "").trim();
+        clean = clean.replaceAll("^[\\.,;:!\\?~\\-_]+", "").trim();
         clean = clean.replaceAll("\\s+", " ").trim();
 
         if (clean.length() > 1) {
@@ -411,53 +472,131 @@ public class AiServiceImpl implements AiService {
     }
 
     /**
-     * Kiểm tra xung đột với các TimeBlock đã có trong DB
+     * Kiểm tra xung đột với các TimeBlock đã có trong DB và đề xuất giờ trống tiếp theo
      */
     private void checkAndResolveConflicts(AiParseTaskResponse response, Long userId) {
-        if (response == null || response.getStartTime() == null)
+        if (response == null || response.getStartTime() == null || userId == null)
             return;
 
         try {
             OffsetDateTime start = OffsetDateTime.parse(response.getStartTime());
             OffsetDateTime end = OffsetDateTime.parse(response.getEndTime());
 
-            // Lấy các timeblocks trong khoảng +- 1 ngày
-            OffsetDateTime windowStart = start.minusDays(1);
-            OffsetDateTime windowEnd = end.plusDays(1);
+            // Lấy các timeblocks trong khoảng +- 2 ngày
+            OffsetDateTime windowStart = start.minusDays(2);
+            OffsetDateTime windowEnd = end.plusDays(2);
 
             List<TimeBlock> existingBlocks = timeBlockRepository.findByUserIdAndStartTimeBetween(userId, windowStart,
                     windowEnd);
 
-            for (TimeBlock b : existingBlocks) {
-                if (b.getStartTime() != null && b.getEndTime() != null) {
-                    // Xung đột: StartA < EndB && EndA > StartB
-                    if (start.isBefore(b.getEndTime()) && end.isAfter(b.getStartTime())) {
-                        response.setHasConflict(true);
-                        response.setConflictingTaskTitle(b.getTitle());
+            if (existingBlocks != null && !existingBlocks.isEmpty()) {
+                existingBlocks.sort(Comparator.comparing(TimeBlock::getStartTime));
 
-                        String bStartStr = b.getStartTime().format(DateTimeFormatter.ofPattern("HH:mm"));
-                        String bEndStr = b.getEndTime().format(DateTimeFormatter.ofPattern("HH:mm"));
+                for (TimeBlock b : existingBlocks) {
+                    if (b.getStartTime() != null && b.getEndTime() != null) {
+                        // Xung đột: StartA < EndB && EndA > StartB
+                        if (start.isBefore(b.getEndTime()) && end.isAfter(b.getStartTime())) {
+                            response.setHasConflict(true);
+                            response.setConflictingTaskTitle(b.getTitle());
 
-                        response.setConflictMessage(String.format(
-                                "Trùng với %s, %s–%s. Bạn có thể chọn giờ thay thế bên dưới hoặc giữ nguyên.",
-                                b.getTitle(), bStartStr, bEndStr));
+                            // Chuyển đổi múi giờ sang GMT+7 chuẩn để hiển thị cho người dùng
+                            OffsetDateTime bStartVn = b.getStartTime().atZoneSameInstant(VIETNAM_ZONE).toOffsetDateTime();
+                            OffsetDateTime bEndVn = b.getEndTime().atZoneSameInstant(VIETNAM_ZONE).toOffsetDateTime();
 
-                        // Gợi ý khung giờ thay thế: ngay sau khi task bị trùng kết thúc
-                        OffsetDateTime altStart = b.getEndTime();
-                        int dur = response.getEstimatedDurationMinutes() != null
-                                ? response.getEstimatedDurationMinutes()
-                                : 60;
-                        OffsetDateTime altEnd = altStart.plusMinutes(dur);
+                            String bStartStr = bStartVn.format(DateTimeFormatter.ofPattern("HH:mm"));
+                            String bEndStr = bEndVn.format(DateTimeFormatter.ofPattern("HH:mm"));
 
-                        response.setSuggestedAlternativeStartTime(altStart.format(ISO_FORMATTER));
-                        response.setSuggestedAlternativeEndTime(altEnd.format(ISO_FORMATTER));
-                        break;
+                            int dur = response.getEstimatedDurationMinutes() != null
+                                    ? response.getEstimatedDurationMinutes()
+                                    : 60;
+
+                            // Tìm khung giờ trống tiếp theo hợp lệ (tránh các task khác và tránh giờ nghỉ trưa)
+                            OffsetDateTime altStart = findNextAvailableFreeSlot(existingBlocks, bEndVn.plusMinutes(15), dur);
+                            OffsetDateTime altEnd = altStart.plusMinutes(dur);
+
+                            String altStartStr = altStart.format(DateTimeFormatter.ofPattern("HH:mm"));
+                            String altEndStr = altEnd.format(DateTimeFormatter.ofPattern("HH:mm"));
+
+                            response.setConflictMessage(String.format(
+                                    "Trùng với %s (%s–%s). Hệ thống đề xuất dời sang giờ trống: %s–%s.",
+                                    b.getTitle(), bStartStr, bEndStr, altStartStr, altEndStr));
+
+                            response.setSuggestedAlternativeStartTime(altStart.format(ISO_FORMATTER));
+                            response.setSuggestedAlternativeEndTime(altEnd.format(ISO_FORMATTER));
+                            break;
+                        }
                     }
+                }
+            }
+
+            // Kiểm tra ràng buộc ngoài giờ làm việc (07:00 - 20:00) theo thiết lập
+            OffsetDateTime startVn = start.atZoneSameInstant(VIETNAM_ZONE).toOffsetDateTime();
+            OffsetDateTime endVn = end.atZoneSameInstant(VIETNAM_ZONE).toOffsetDateTime();
+            int endH = endVn.getHour();
+            int endM = endVn.getMinute();
+            int startH = startVn.getHour();
+            if (endH > 20 || (endH == 20 && endM > 0) || startH < 7) {
+                String warningNote = "Thời gian công việc vượt quá thời gian kết thúc (20:00). Bạn có muốn tạo việc làm ngoài giờ nghỉ?";
+                if (response.getNote() == null || response.getNote().isBlank()) {
+                    response.setNote(warningNote);
+                } else if (!response.getNote().contains("ngoài giờ nghỉ")) {
+                    response.setNote(response.getNote() + " · " + warningNote);
                 }
             }
         } catch (Exception e) {
             log.warn("Lỗi kiểm tra xung đột lịch: {}", e.getMessage());
         }
+    }
+
+    /**
+     * Tìm khung giờ trống kế tiếp trong ngày làm việc (07:00 - 20:00, tránh nghỉ trưa 12:00 - 13:00)
+     */
+    private OffsetDateTime findNextAvailableFreeSlot(List<TimeBlock> existingBlocks, OffsetDateTime candidateStart, int durationMinutes) {
+        OffsetDateTime candidate = candidateStart.atZoneSameInstant(VIETNAM_ZONE).toOffsetDateTime();
+
+        // Đảm bảo không rơi vào giờ nghỉ trưa (12:00 - 13:00)
+        int h = candidate.getHour();
+        if (h >= 12 && h < 13) {
+            candidate = candidate.withHour(13).withMinute(0);
+        }
+
+        // Lặp kiểm tra xem candidate có bị trùng với block nào khác không
+        boolean hasConflict = true;
+        int maxAttempts = 15;
+        while (hasConflict && maxAttempts-- > 0) {
+            hasConflict = false;
+            OffsetDateTime candidateEnd = candidate.plusMinutes(durationMinutes);
+
+            // Nếu vượt quá 20:00, chuyển sang sáng hôm sau lúc 08:00
+            if (candidateEnd.getHour() > 20 || (candidateEnd.getHour() == 20 && candidateEnd.getMinute() > 0)) {
+                candidate = candidate.plusDays(1).withHour(8).withMinute(0);
+                candidateEnd = candidate.plusMinutes(durationMinutes);
+            }
+
+            // Nếu rơi vào nghỉ trưa 12:00 - 13:00
+            if ((candidate.getHour() < 13 && candidateEnd.getHour() > 12) || (candidate.getHour() == 12)) {
+                candidate = candidate.withHour(13).withMinute(0);
+                candidateEnd = candidate.plusMinutes(durationMinutes);
+            }
+
+            if (existingBlocks != null) {
+                for (TimeBlock b : existingBlocks) {
+                    if (b.getStartTime() != null && b.getEndTime() != null) {
+                        OffsetDateTime bStartVn = b.getStartTime().atZoneSameInstant(VIETNAM_ZONE).toOffsetDateTime();
+                        OffsetDateTime bEndVn = b.getEndTime().atZoneSameInstant(VIETNAM_ZONE).toOffsetDateTime();
+
+                        if (candidate.isBefore(bEndVn) && candidateEnd.isAfter(bStartVn)) {
+                            // Bị trùng! Dời candidate sang sau khi block b kết thúc + 15 phút đệm
+                            candidate = bEndVn.plusMinutes(15);
+                            hasConflict = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        return candidate;
     }
 
     private OffsetDateTime parseReferenceDateTime(String clientDateTime) {

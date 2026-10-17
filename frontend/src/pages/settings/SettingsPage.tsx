@@ -42,7 +42,7 @@ const DEFAULT_SETTINGS: UserSettingsData = {
   language: 'Tiếng Việt',
   timezone: '(GMT+07:00) Hồ Chí Minh',
   workingDays: ['MON', 'TUE', 'WED', 'THU', 'FRI'],
-  workHours: '08:00 - 18:00',
+  workHours: '07:00 - 20:00',
   lunchBreak: '12:00 - 13:00',
   bufferMinutes: '15 phút',
   allowWeekend: true,

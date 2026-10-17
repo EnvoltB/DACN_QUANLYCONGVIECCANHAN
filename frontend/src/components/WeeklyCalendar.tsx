@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { RotateCw, MoreVertical, GripVertical } from 'lucide-react';
 import { TimeBlock, Category } from '../types';
+import { checkWorkHoursConstraint } from '../utils/workHoursConstraint';
 
 interface WeeklyCalendarProps {
   timeBlocks: (TimeBlock & { isRecurring?: boolean; subtext?: string; colorOverride?: string })[];
@@ -36,6 +37,105 @@ const getBaseWeekDays = () => {
   });
 };
 const DAYS_BASE = getBaseWeekDays();
+
+interface PositionedBlock {
+  block: any;
+  startHour: number;
+  endHour: number;
+  durationMs: number;
+  top: number;
+  height: number;
+  colIndex: number;
+  totalCols: number;
+}
+
+function computeLayoutBlocks(blocks: any[]): PositionedBlock[] {
+  if (!blocks || blocks.length === 0) return [];
+
+  const parsed = blocks.map((b) => {
+    const s = new Date(b.startTime);
+    const e = new Date(b.endTime);
+    const startH = s.getHours() + s.getMinutes() / 60;
+    let endH = e.getHours() + e.getMinutes() / 60;
+    if (endH <= startH) endH = startH + 1;
+    const durMs = Math.max(1800000, e.getTime() - s.getTime());
+    return {
+      block: b,
+      startHour: startH,
+      endHour: endH,
+      durationMs: durMs,
+      top: Math.round(startH * HOUR_HEIGHT),
+      height: Math.max(34, Math.round((endH - startH) * HOUR_HEIGHT) - 2),
+    };
+  });
+
+  parsed.sort((a, b) => {
+    if (Math.abs(a.startHour - b.startHour) > 0.001) return a.startHour - b.startHour;
+    return (b.endHour - b.startHour) - (a.endHour - a.startHour);
+  });
+
+  const clusters: (typeof parsed)[] = [];
+  let currentCluster: typeof parsed = [];
+  let clusterEnd = -1;
+
+  for (const item of parsed) {
+    if (currentCluster.length === 0) {
+      currentCluster.push(item);
+      clusterEnd = item.endHour;
+    } else {
+      if (item.startHour < clusterEnd - 0.001) {
+        currentCluster.push(item);
+        clusterEnd = Math.max(clusterEnd, item.endHour);
+      } else {
+        clusters.push(currentCluster);
+        currentCluster = [item];
+        clusterEnd = item.endHour;
+      }
+    }
+  }
+  if (currentCluster.length > 0) {
+    clusters.push(currentCluster);
+  }
+
+  const result: PositionedBlock[] = [];
+
+  for (const cluster of clusters) {
+    const colEnds: number[] = [];
+    const assigned: { item: typeof parsed[0]; colIndex: number }[] = [];
+
+    for (const item of cluster) {
+      let placedCol = -1;
+      for (let c = 0; c < colEnds.length; c++) {
+        if (item.startHour >= colEnds[c] - 0.001) {
+          placedCol = c;
+          colEnds[c] = item.endHour;
+          break;
+        }
+      }
+      if (placedCol === -1) {
+        placedCol = colEnds.length;
+        colEnds.push(item.endHour);
+      }
+      assigned.push({ item, colIndex: placedCol });
+    }
+
+    const totalCols = Math.max(1, colEnds.length);
+    for (const a of assigned) {
+      result.push({
+        block: a.item.block,
+        startHour: a.item.startHour,
+        endHour: a.item.endHour,
+        durationMs: a.item.durationMs,
+        top: a.item.top,
+        height: a.item.height,
+        colIndex: a.colIndex,
+        totalCols,
+      });
+    }
+  }
+
+  return result;
+}
 
 export default function WeeklyCalendar({
   timeBlocks,
@@ -237,6 +337,13 @@ export default function WeeklyCalendar({
                           }
                           const newEndIso = `${targetDate}T${endHourStr}:${endMinStr}:00+07:00`;
 
+                          const targetBlock = timeBlocks.find((b) => b.id === id);
+                          const validation = checkWorkHoursConstraint(newStartIso, newEndIso, targetBlock?.categoryType || 'WORK');
+                          if (validation.isOutsideWorkHours) {
+                            const confirmed = window.confirm(`${validation.reason}\n\n${validation.promptMessage}`);
+                            if (!confirmed) return;
+                          }
+
                           if (onRescheduleTask) {
                             onRescheduleTask(id, newStartIso, newEndIso);
                           }
@@ -278,25 +385,19 @@ export default function WeeklyCalendar({
                     </div>
                   )}
 
-                  {/* Event Blocks */}
-                  {dayBlocks.map((block) => {
+                  {/* Event Blocks - Tự động chia cột bên cạnh nhau khi trùng giờ, không chèn đè lên nhau */}
+                  {computeLayoutBlocks(dayBlocks).map(({ block, top, height, durationMs, colIndex, totalCols }) => {
                     const start = new Date(block.startTime);
                     const end = new Date(block.endTime);
-                    const startHour = start.getHours() + start.getMinutes() / 60;
-                    const endHour = end.getHours() + end.getMinutes() / 60;
-                    const durationMs = end.getTime() - start.getTime();
-
-                    // Perfect alignment from 0:00 grid origin (no -8 offset)
-                    const top = Math.round(startHour * HOUR_HEIGHT);
-                    const rawHeight = Math.round((endHour - startHour) * HOUR_HEIGHT);
-                    const height = Math.max(34, rawHeight - 2);
-
                     const styles = getCategoryStyles(block.categoryType, block.colorOverride);
                     const timeRangeStr = `${start.getHours().toString().padStart(2, '0')}:${start.getMinutes().toString().padStart(2, '0')}–${end.getHours().toString().padStart(2, '0')}:${end.getMinutes().toString().padStart(2, '0')}`;
 
                     const isCompact = height < 80;
                     const isHovered = hoveredBlockId === block.id;
                     const isDragging = draggingBlockId === block.id;
+
+                    const colWidthPercent = 100 / totalCols;
+                    const leftPercent = colIndex * colWidthPercent;
 
                     return (
                       <div
@@ -318,7 +419,10 @@ export default function WeeklyCalendar({
                           top: `${top}px`,
                           height: isCompact && isHovered ? 'auto' : `${height}px`,
                           minHeight: isCompact && isHovered ? '86px' : undefined,
-                          zIndex: isCompact && isHovered ? 80 : isDragging ? 90 : undefined,
+                          left: totalCols > 1 ? `calc(${leftPercent}% + 2px)` : '3px',
+                          width: totalCols > 1 ? `calc(${colWidthPercent}% - 4px)` : 'calc(100% - 6px)',
+                          right: 'auto',
+                          zIndex: isCompact && isHovered ? 80 : isDragging ? 90 : 2 + colIndex,
                           borderLeft: styles.borderLeft,
                           backgroundColor: styles.backgroundColor,
                         }}

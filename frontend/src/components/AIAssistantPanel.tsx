@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   Sparkles, Mic, MicOff, ArrowUp, Calendar as CalendarIcon,
-  Flag, AlertTriangle, BookOpen, ExternalLink, Loader2, CheckCircle2
+  Flag, AlertTriangle, BookOpen, ExternalLink, Loader2, CheckCircle2, Clock
 } from 'lucide-react';
 import { TimeBlock } from '../types';
 import { aiService, AiParseTaskResponse } from '../services/aiService';
+import { checkWorkHoursConstraint } from '../utils/workHoursConstraint';
 
 interface AIAssistantPanelProps {
   onScheduleTask: (newTask: Partial<TimeBlock>) => void;
@@ -28,8 +29,48 @@ export default function AIAssistantPanel({
   const [isLoading, setIsLoading] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
   const [isConfirmed, setIsConfirmed] = useState(false);
+  const [offHoursPendingConfirm, setOffHoursPendingConfirm] = useState<{
+    useAlternative: boolean;
+    reason: string;
+    promptMessage: string;
+  } | null>(null);
 
   const recognitionRef = useRef<any>(null);
+
+  // Helper: Chuyển đổi từ số nói tiếng Việt sang số (khi nói 1 thì luôn thành số 1)
+  const convertSpokenWordsToNumbers = (text: string): string => {
+    if (!text) return text;
+    let res = text;
+    // Chuyển đổi "một" thành "1" (theo yêu cầu: nói 1 thì sẽ luôn là số)
+    res = res.replace(/(?:một|mốt)\s*(?:giờ|gio|h)\b/gi, '1h');
+    res = res.replace(/(?:một|mốt)\s*(?:tiếng|tieng)\b/gi, '1 tiếng');
+    res = res.replace(/(?:một|mốt)\s*(?:lịch|lich)\b/gi, '1 lịch');
+    res = res.replace(/(?:một|mốt)\s*(?:ngày|ngay)\b/gi, '1 ngày');
+    res = res.replace(/(?:một|mốt)\s*(?:phút|phut|p)\b/gi, '1 phút');
+    res = res.replace(/(?:vào lúc|lúc|từ|đến|tới|khoảng|tầm)\s+(?:một|mốt)\b/gi, (match) => {
+      return match.replace(/(?:một|mốt)/gi, '1');
+    });
+    res = res.replace(/\b(?:một|mốt)\b/gi, '1');
+
+    // Chuyển đổi các số phổ biến khác: hai -> 2, ba -> 3...
+    res = res.replace(/\bhai\s*(?:giờ|gio|h)\b/gi, '2h');
+    res = res.replace(/\bhai\s*(?:tiếng|tieng)\b/gi, '2 tiếng');
+    res = res.replace(/\bba\s*(?:giờ|gio|h)\b/gi, '3h');
+    res = res.replace(/\bbốn\s*(?:giờ|gio|h)\b/gi, '4h');
+    res = res.replace(/\bnăm\s*(?:giờ|gio|h)\b/gi, '5h');
+    res = res.replace(/\bsáu\s*(?:giờ|gio|h)\b/gi, '6h');
+    res = res.replace(/\bbảy\s*(?:giờ|gio|h)\b/gi, '7h');
+    res = res.replace(/\btám\s*(?:giờ|gio|h)\b/gi, '8h');
+    res = res.replace(/\bchín\s*(?:giờ|gio|h)\b/gi, '9h');
+    res = res.replace(/\bmười\s*(?:giờ|gio|h)\b/gi, '10h');
+
+    // Viết tắt giờ phút:
+    res = res.replace(/\bhai\s*giờ\s*ba\s*mươi(?:\s*phút)?\b/gi, '2h30');
+    res = res.replace(/\bhai\s*giờ\s*rưỡi\b/gi, '2h30');
+    res = res.replace(/\b(\d+)\s*tiếng\s*rưỡi\b/gi, '$1 tiếng rưỡi');
+
+    return res;
+  };
 
   // Initialize Web Speech API if supported
   useEffect(() => {
@@ -48,9 +89,10 @@ export default function AIAssistantPanel({
       };
 
       recognition.onresult = (event: any) => {
-        const transcript = Array.from(event.results)
+        let transcript = Array.from(event.results)
           .map((res: any) => res[0].transcript)
           .join('');
+        transcript = convertSpokenWordsToNumbers(transcript);
         setInputText(transcript);
       };
 
@@ -104,6 +146,7 @@ export default function AIAssistantPanel({
     setIsLoading(true);
     setApiError(null);
     setIsConfirmed(false);
+    setOffHoursPendingConfirm(null);
 
     try {
       let refIso: string | undefined = undefined;
@@ -137,7 +180,7 @@ export default function AIAssistantPanel({
   };
 
   // Handle Confirm & Auto-reschedule or direct schedule
-  const handleConfirmSchedule = (useAlternative: boolean = false) => {
+  const handleConfirmSchedule = (useAlternative: boolean = false, bypassOffHours: boolean = false) => {
     if (!parsedTask) return;
 
     const start = (useAlternative && parsedTask.suggestedAlternativeStartTime)
@@ -148,6 +191,19 @@ export default function AIAssistantPanel({
       ? parsedTask.suggestedAlternativeEndTime
       : parsedTask.endTime;
 
+    // Ràng buộc kiểm tra ngoài giờ làm việc & giờ nghỉ
+    if (!bypassOffHours) {
+      const val = checkWorkHoursConstraint(start, end, parsedTask.categoryType);
+      if (val.isOutsideWorkHours) {
+        setOffHoursPendingConfirm({
+          useAlternative,
+          reason: val.reason || 'Thời gian công việc nằm ngoài giờ làm việc hoặc rơi vào giờ nghỉ.',
+          promptMessage: val.promptMessage, // "Bạn có muốn tạo việc làm ngoài giờ nghỉ?"
+        });
+        return;
+      }
+    }
+
     onScheduleTask({
       title: parsedTask.title,
       startTime: start,
@@ -157,6 +213,7 @@ export default function AIAssistantPanel({
       isAutoScheduled: true,
       priority: parsedTask.priority,
     });
+    setOffHoursPendingConfirm(null);
     setIsConfirmed(true);
   };
 
@@ -457,6 +514,37 @@ export default function AIAssistantPanel({
               {parsedTask.note || 'Mặc định bạn có thể chỉnh trước khi thêm.'}
             </p>
 
+            {/* Cảnh báo ngoài giờ làm việc & giờ nghỉ theo thiết lập */}
+            {(() => {
+              const check = checkWorkHoursConstraint(parsedTask.startTime, parsedTask.endTime, parsedTask.categoryType);
+              if (!check.isOutsideWorkHours) return null;
+              return (
+                <div
+                  style={{
+                    marginTop: 6,
+                    background: '#FFF7ED',
+                    border: '1px solid #FED7AA',
+                    borderRadius: 8,
+                    padding: '10px 12px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 4,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#C2410C', fontWeight: 600, fontSize: '0.82rem' }}>
+                    <Clock size={15} />
+                    <span>Ngoài khung giờ làm việc đã thiết lập ({check.workStart}–{check.workEnd})</span>
+                  </div>
+                  <p style={{ fontSize: '0.77rem', color: '#9A3412', lineHeight: 1.45, margin: 0 }}>
+                    {check.reason}
+                  </p>
+                  <div style={{ fontSize: '0.8rem', fontWeight: 700, color: '#EA580C', marginTop: 2 }}>
+                    {check.promptMessage}
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Amber Conflict Warning */}
             {parsedTask.hasConflict && (
               <div
@@ -481,61 +569,141 @@ export default function AIAssistantPanel({
               </div>
             )}
 
-            {/* Action Buttons */}
-            {!isConfirmed ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
-                {/* Nút 1: Luôn thêm đúng giờ người dùng yêu cầu */}
-                <button
-                  onClick={() => handleConfirmSchedule(false)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: 8,
-                    padding: '10px 14px',
-                    background: '#4F46E5',
-                    color: '#FFFFFF',
-                    borderRadius: 8,
-                    fontWeight: 600,
-                    fontSize: '0.86rem',
-                    boxShadow: '0 2px 6px rgba(79,70,229,0.25)',
-                    cursor: 'pointer',
-                    border: 'none',
-                    transition: 'background 0.2s',
-                  }}
-                >
-                  <span>
-                    {parsedTask.hasConflict
-                      ? `→ Vẫn thêm vào giờ này (${parsedTask.startTime.substring(11, 16)}–${parsedTask.endTime.substring(11, 16)})`
-                      : '→ Xác nhận & thêm vào lịch'}
-                  </span>
-                </button>
-
-                {/* Nút 2: Tùy chọn dời sang giờ thay thế nếu có xung đột */}
-                {parsedTask.hasConflict && parsedTask.suggestedAlternativeStartTime && (
+            {/* Hộp xác nhận khi tạo việc ngoài giờ nghỉ */}
+            {offHoursPendingConfirm && (
+              <div
+                style={{
+                  marginTop: 8,
+                  background: '#FFFBEB',
+                  border: '1.5px solid #FCD34D',
+                  borderRadius: 10,
+                  padding: '12px 14px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 8,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#B45309', fontWeight: 700, fontSize: '0.85rem' }}>
+                  <AlertTriangle size={16} />
+                  <span>{offHoursPendingConfirm.promptMessage}</span>
+                </div>
+                <p style={{ fontSize: '0.78rem', color: '#78350F', margin: 0 }}>
+                  {offHoursPendingConfirm.reason}
+                </p>
+                <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
                   <button
-                    onClick={() => handleConfirmSchedule(true)}
+                    onClick={() => setOffHoursPendingConfirm(null)}
+                    style={{
+                      flex: 1,
+                      padding: '7px 10px',
+                      background: '#FFFFFF',
+                      border: '1px solid #D1D5DB',
+                      borderRadius: 6,
+                      fontSize: '0.8rem',
+                      fontWeight: 600,
+                      color: '#4B5563',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Hủy bỏ
+                  </button>
+                  <button
+                    onClick={() => handleConfirmSchedule(offHoursPendingConfirm.useAlternative, true)}
+                    style={{
+                      flex: 1,
+                      padding: '7px 10px',
+                      background: '#D97706',
+                      border: 'none',
+                      borderRadius: 6,
+                      fontSize: '0.8rem',
+                      fontWeight: 600,
+                      color: '#FFFFFF',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Đồng ý tạo ngoài giờ
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            {!isConfirmed && !offHoursPendingConfirm ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
+                {parsedTask.hasConflict ? (
+                  <>
+                    {/* Nút chính ưu tiên: Tự động chuyển sang giờ trống tiếp theo để không chèn đè lên task trước */}
+                    {parsedTask.suggestedAlternativeStartTime && (
+                      <button
+                        onClick={() => handleConfirmSchedule(true)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 6,
+                          padding: '10px 14px',
+                          background: '#4F46E5',
+                          color: '#FFFFFF',
+                          borderRadius: 8,
+                          fontWeight: 600,
+                          fontSize: '0.86rem',
+                          boxShadow: '0 2px 6px rgba(79,70,229,0.25)',
+                          cursor: 'pointer',
+                          border: 'none',
+                        }}
+                      >
+                        <span>⚡ Tự động chuyển sang giờ trống ({parsedTask.suggestedAlternativeStartTime.substring(11, 16)}–{parsedTask.suggestedAlternativeEndTime?.substring(11, 16)})</span>
+                      </button>
+                    )}
+
+                    {/* Nút phụ: Giữ nguyên giờ trùng nếu người dùng chủ ý xếp chồng */}
+                    <button
+                      onClick={() => handleConfirmSchedule(false)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 6,
+                        padding: '8px 12px',
+                        background: '#FFF7ED',
+                        color: '#C2410C',
+                        border: '1px solid #FED7AA',
+                        borderRadius: 8,
+                        fontWeight: 600,
+                        fontSize: '0.8rem',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <span>⚠️ Vẫn xếp chồng giờ này ({parsedTask.startTime.substring(11, 16)}–{parsedTask.endTime.substring(11, 16)})</span>
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => handleConfirmSchedule(false)}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      gap: 6,
-                      padding: '8px 12px',
-                      background: '#FFF7ED',
-                      color: '#C2410C',
-                      border: '1px solid #FED7AA',
+                      gap: 8,
+                      padding: '10px 14px',
+                      background: '#4F46E5',
+                      color: '#FFFFFF',
                       borderRadius: 8,
                       fontWeight: 600,
-                      fontSize: '0.8rem',
+                      fontSize: '0.86rem',
+                      boxShadow: '0 2px 6px rgba(79,70,229,0.25)',
                       cursor: 'pointer',
-                      transition: 'all 0.2s',
+                      border: 'none',
+                      transition: 'background 0.2s',
                     }}
                   >
-                    <span>⚡ Dời sang giờ trống ({parsedTask.suggestedAlternativeStartTime.substring(11, 16)}–{parsedTask.suggestedAlternativeEndTime?.substring(11, 16)})</span>
+                    <span>→ Xác nhận & thêm vào lịch</span>
                   </button>
                 )}
               </div>
-            ) : (
+            ) : null}
+
+            {isConfirmed && (
               <div
                 style={{
                   marginTop: 6,
@@ -650,6 +818,33 @@ export default function AIAssistantPanel({
         >
           <Sparkles size={16} style={{ color: '#10B981', flexShrink: 0 }} />
           <span style={{ flex: 1 }}>Nhắc tôi chạy bộ 45 phút vào 6h sáng thứ 2 tuần sau</span>
+          <ExternalLink size={14} style={{ color: '#94A3B8', flexShrink: 0 }} />
+        </button>
+
+        <button
+          onClick={() => {
+            const prompt = 'Hãy lặp cho tôi một lịch Tiếng Anh 2 vào lúc 1h đến 2h30p khoảng 1tiếng rưỡi chiều ngày hôm sau thứ 7';
+            setInputText(prompt);
+            executeAiParse(prompt);
+          }}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '12px 14px',
+            background: '#F8FAFC',
+            border: '1px solid #E2E8F0',
+            borderRadius: 10,
+            textAlign: 'left',
+            color: '#334155',
+            fontSize: '0.83rem',
+            lineHeight: 1.4,
+            cursor: 'pointer',
+            transition: 'all 0.15s',
+          }}
+        >
+          <BookOpen size={16} style={{ color: '#7C3AED', flexShrink: 0 }} />
+          <span style={{ flex: 1 }}>Lịch Tiếng Anh 1h đến 2h30 chiều (1 tiếng rưỡi)</span>
           <ExternalLink size={14} style={{ color: '#94A3B8', flexShrink: 0 }} />
         </button>
       </div>
