@@ -22,7 +22,12 @@ export default function TaskModal({
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const [title, setTitle] = useState('');
   const [categoryType, setCategoryType] = useState('WORK');
-  const [date, setDate] = useState('2026-10-13');
+  const getTodayStr = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+
+  const [date, setDate] = useState(getTodayStr());
   const [startTime, setStartTime] = useState('09:00');
   const [endTime, setEndTime] = useState('10:00');
   const [priority, setPriority] = useState<Priority>('MEDIUM');
@@ -55,7 +60,7 @@ export default function TaskModal({
     } else {
       setTitle('');
       setCategoryType('WORK');
-      setDate('2026-10-13');
+      setDate(getTodayStr());
       setStartTime('09:00');
       setEndTime('10:00');
       setPriority('MEDIUM');

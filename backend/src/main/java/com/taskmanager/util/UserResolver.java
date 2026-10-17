@@ -3,16 +3,18 @@ package com.taskmanager.util;
 import com.taskmanager.entity.User;
 import com.taskmanager.repository.UserRepository;
 import jakarta.servlet.http.HttpServletRequest;
-import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.util.Optional;
 
 @Component
-@RequiredArgsConstructor
 public class UserResolver {
 
     private final UserRepository userRepository;
+
+    public UserResolver(UserRepository userRepository) {
+        this.userRepository = userRepository;
+    }
 
     public Long resolveUserId(HttpServletRequest request) {
         if (request != null) {

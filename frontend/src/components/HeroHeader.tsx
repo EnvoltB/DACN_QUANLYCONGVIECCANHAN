@@ -14,7 +14,7 @@ export default function HeroHeader({
   return (
     <div className="hero-section">
       <div>
-        <h1 className="hero-title">Một tuần, đúng nhịp của bạn.</h1>
+        <h1 className="hero-title">Một tuần hiệu quả cùng SmartTask.</h1>
         <p className="hero-subtitle">
           Chào {userName}, hôm nay có {todayTasksCount} công việc. SmartTask giúp bạn cân bằng việc cần làm và thời gian cho mình.
         </p>

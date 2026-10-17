@@ -20,5 +20,11 @@ frontend/dist/
 .vscode/
 .idea/
 
-# Logs
+# Logs & Errors
 *.log
+error-log.txt
+backend/error-log.txt
+
+# Android
+android/.gradle/
+.gradle/
