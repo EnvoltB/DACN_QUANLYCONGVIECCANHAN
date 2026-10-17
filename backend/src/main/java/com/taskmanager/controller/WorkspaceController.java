@@ -18,7 +18,6 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/workspaces")
-@RequiredArgsConstructor
 @CrossOrigin(origins = "*")
 public class WorkspaceController {
 
@@ -26,6 +25,17 @@ public class WorkspaceController {
     private final TaskRepository taskRepository;
     private final CategoryRepository categoryRepository;
     private final UserResolver userResolver;
+
+    public WorkspaceController(
+            WorkspaceRepository workspaceRepository,
+            TaskRepository taskRepository,
+            CategoryRepository categoryRepository,
+            UserResolver userResolver) {
+        this.workspaceRepository = workspaceRepository;
+        this.taskRepository = taskRepository;
+        this.categoryRepository = categoryRepository;
+        this.userResolver = userResolver;
+    }
 
     @GetMapping
     public ResponseEntity<List<Workspace>> getWorkspaces(HttpServletRequest request) {

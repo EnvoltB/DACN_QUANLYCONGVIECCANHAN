@@ -13,13 +13,21 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/categories")
-@RequiredArgsConstructor
 @CrossOrigin(origins = "*")
 public class CategoryController {
 
     private final CategoryRepository categoryRepository;
     private final com.taskmanager.repository.TaskRepository taskRepository;
     private final UserResolver userResolver;
+
+    public CategoryController(
+            CategoryRepository categoryRepository,
+            com.taskmanager.repository.TaskRepository taskRepository,
+            UserResolver userResolver) {
+        this.categoryRepository = categoryRepository;
+        this.taskRepository = taskRepository;
+        this.userResolver = userResolver;
+    }
 
     @GetMapping
     public ResponseEntity<List<Category>> getCategories(

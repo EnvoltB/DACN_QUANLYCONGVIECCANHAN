@@ -16,13 +16,21 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/notifications")
-@RequiredArgsConstructor
 @CrossOrigin(origins = "*")
 public class NotificationController {
 
     private final NotificationRepository notificationRepository;
     private final NotificationDecisionService notificationDecisionService;
     private final UserResolver userResolver;
+
+    public NotificationController(
+            NotificationRepository notificationRepository,
+            NotificationDecisionService notificationDecisionService,
+            UserResolver userResolver) {
+        this.notificationRepository = notificationRepository;
+        this.notificationDecisionService = notificationDecisionService;
+        this.userResolver = userResolver;
+    }
 
     /**
      * Lấy danh sách toàn bộ thông báo từ CSDL của người dùng hiện tại

@@ -14,12 +14,16 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/tasks")
-@RequiredArgsConstructor
 @CrossOrigin(origins = "*")
 public class TaskController {
 
     private final TaskService taskService;
     private final UserResolver userResolver;
+
+    public TaskController(TaskService taskService, UserResolver userResolver) {
+        this.taskService = taskService;
+        this.userResolver = userResolver;
+    }
 
     @GetMapping
     public ResponseEntity<List<TaskDto>> getTasks(
